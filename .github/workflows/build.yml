@@ -1,0 +1,45 @@
+# Builds the signed release APK (com.limelight.unofficial) for sideloading.
+# Signing secrets: SIGNING_KEYSTORE_BASE64 (PKCS12), SIGNING_PASSWORD, SIGNING_KEY_ALIAS.
+name: Build APK
+
+on:
+  push:
+    branches: [ shield-dualsense ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install SDK platform and NDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "ndk;29.0.14206865" > /dev/null
+
+      - name: Decode signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/signing.p12"
+
+      - name: Build release APK
+        env:
+          SIGNING_KEYSTORE: ${{ runner.temp }}/signing.p12
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+        run: ./gradlew --no-daemon assembleNonRootRelease
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moonlight-dualsense-apk
+          path: app/build/outputs/apk/nonRoot/release/*.apk
+          if-no-files-found: error

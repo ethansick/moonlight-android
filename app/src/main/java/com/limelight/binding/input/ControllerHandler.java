@@ -866,7 +866,11 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
 
                     // DS4 has Select and Mode buttons (possibly mapped non-standard)
                     context.hasSelect = true;
-                    context.hasMode = true;
+
+                    // SHIELD TV takes the Mode (PS) button for its own Home action before it
+                    // reaches us, so leave the Start+Select combo available to emulate it there.
+                    // A Mode press that does arrive sets hasMode again in handleButtonDown().
+                    context.hasMode = !"NVIDIA".equalsIgnoreCase(Build.MANUFACTURER);
                 }
                 else {
                     // If it's not a non-standard DS4 controller, it's probably an Xbox controller or
@@ -1435,6 +1439,10 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
                     return KeyEvent.KEYCODE_BUTTON_THUMBR;
                 case 316:
                     return KeyEvent.KEYCODE_BUTTON_MODE;
+                case 317:
+                    // Clickpad, reported as a plain button without a PS4/PS5 driver
+                    // (e.g. DualSense controllers on the SHIELD TV's 4.9 kernel)
+                    return KeyEvent.KEYCODE_BUTTON_1;
                 default:
                     return REMAP_CONSUME;
             }
@@ -3126,6 +3134,11 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
             }
             if (hasShare) {
                 supportedButtonFlags |= ControllerPacket.MISC_FLAG;
+            }
+            if (isNonStandardDualShock4) {
+                // The clickpad comes through as a plain button (remapped in handleRemapping())
+                // since there's no separate touchpad device to detect it from
+                supportedButtonFlags |= ControllerPacket.TOUCHPAD_FLAG;
             }
 
             if (getMotionRangeForJoystickAxis(inputDevice, MotionEvent.AXIS_HAT_X) != null) {

@@ -81,6 +81,20 @@ android {
         }
     }
 
+    signingConfigs {
+        // CI release builds: the GitHub Actions workflow supplies the key through these
+        // variables so every build is signed the same way and installs as an update
+        if (System.getenv("SIGNING_KEYSTORE")) {
+            ci {
+                storeFile file(System.getenv("SIGNING_KEYSTORE"))
+                storeType "pkcs12"
+                storePassword System.getenv("SIGNING_STORE_PASSWORD")
+                keyAlias System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword System.getenv("SIGNING_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix ".debug"
@@ -119,11 +133,15 @@ android {
             //
             // TL;DR: Leave the following line alone!
             applicationIdSuffix ".unofficial"
-            resValue "string", "app_label", "Moonlight"
+            resValue "string", "app_label", "Moonlight (DualSense)"
             resValue "string", "app_label_root", "Moonlight (Root)"
 
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+
+            if (System.getenv("SIGNING_KEYSTORE")) {
+                signingConfig signingConfigs.ci
+            }
         }
     }
 
