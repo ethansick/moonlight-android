@@ -127,6 +127,11 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
     private boolean hasGameController;
     private boolean stopped = false;
 
+    // USB controllers report state as soon as they're claimed, which can be before the
+    // stream is up. Their input is held back until then so the host gets each controller's
+    // arrival (type and capabilities) first instead of guessing a default type.
+    private volatile boolean connectionStarted = false;
+
     private final PreferenceConfiguration prefConfig;
     private short currentControllers, initialControllers;
 
@@ -266,6 +271,15 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         InputDeviceContext newContext = createInputDeviceContextForDevice(device);
         newContext.migrateContext(existingContext);
         inputDeviceContexts.put(deviceId, newContext);
+    }
+
+    public void onConnectionStarted() {
+        connectionStarted = true;
+
+        // Announce USB controllers that were claimed before the stream came up, with their current state
+        for (int i = 0; i < usbDeviceContexts.size(); i++) {
+            sendControllerInputPacket(usbDeviceContexts.valueAt(i));
+        }
     }
 
     public void stop() {
@@ -2855,6 +2869,11 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         else if (context.pendingExit && buttonFlags == 0) {
             // All buttons from the quit combo are lifted. Finish the activity now.
             activityContext.runOnUiThread(activityContext::finish);
+        }
+
+        if (!connectionStarted) {
+            // onConnectionStarted() sends the latest state once the stream is up
+            return;
         }
 
         sendControllerInputPacket(context);
