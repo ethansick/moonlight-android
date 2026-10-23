@@ -303,4 +303,7 @@
     <string name="analogscroll_none">None (both sticks move the mouse)</string>
     <string name="analogscroll_right">Right analog stick</string>
     <string name="analogscroll_left">Left analog stick</string>
+
+    <string name="guide_button_service_label">Moonlight controller Guide button</string>
+    <string name="guide_button_service_description">Sends your controller\'s Guide button (PS, Xbox, etc.) to the stream instead of letting the TV use it as Home. Only active while a stream is on screen.</string>
 </resources>

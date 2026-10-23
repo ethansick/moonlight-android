@@ -109,6 +109,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     private static final int THREE_FINGER_TAP_THRESHOLD = 300;
 
+    // The stream window that currently has focus, for GuideButtonService (main thread only)
+    private static Game focusedInstance;
+
     private ControllerHandler controllerHandler;
     private KeyboardTranslator keyboardTranslator;
     private VirtualController virtualController;
@@ -738,9 +741,20 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         return true;
     }
 
+    public static Game getFocusedInstance() {
+        return focusedInstance;
+    }
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
+
+        if (hasFocus) {
+            focusedInstance = this;
+        }
+        else if (focusedInstance == this) {
+            focusedInstance = null;
+        }
 
         // We can't guarantee the state of modifiers keys which may have
         // lifted while focus was not on us. Clear the modifier state.
@@ -1035,6 +1049,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     @Override
     protected void onDestroy() {
         super.onDestroy();
+
+        if (focusedInstance == this) {
+            focusedInstance = null;
+        }
 
         if (controllerHandler != null) {
             controllerHandler.destroy();

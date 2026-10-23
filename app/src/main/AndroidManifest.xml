@@ -177,6 +177,18 @@
         <service
             android:name=".binding.input.driver.UsbDriverService"
             android:label="Usb Driver Service" />
+        <service
+            android:name=".binding.input.GuideButtonService"
+            android:label="@string/guide_button_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/guide_button_service" />
+        </service>
 
         <activity
             android:name=".HelpActivity"
