@@ -2815,7 +2815,7 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
                                       float leftStickX, float leftStickY,
                                       float rightStickX, float rightStickY,
                                       float leftTrigger, float rightTrigger) {
-        GenericControllerContext context = usbDeviceContexts.get(controllerId);
+        UsbDeviceContext context = usbDeviceContexts.get(controllerId);
         if (context == null) {
             return;
         }
@@ -2845,6 +2845,17 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         context.rightTrigger = (byte)(rightTrigger * 0xFF);
 
         context.inputMap = buttonFlags;
+
+        // Start+Back+LB+RB is the quit combo, as for Android input devices (see handleButtonDown()).
+        // USB controllers are invisible to Android, so this is the only way out from them.
+        if (buttonFlags == (ControllerPacket.BACK_FLAG | ControllerPacket.PLAY_FLAG |
+                ControllerPacket.LB_FLAG | ControllerPacket.RB_FLAG)) {
+            context.pendingExit = true;
+        }
+        else if (context.pendingExit && buttonFlags == 0) {
+            // All buttons from the quit combo are lifted. Finish the activity now.
+            activityContext.runOnUiThread(activityContext::finish);
+        }
 
         sendControllerInputPacket(context);
     }
@@ -3297,6 +3308,7 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
 
     class UsbDeviceContext extends GenericControllerContext {
         public AbstractController device;
+        public boolean pendingExit;
 
         @Override
         public void destroy() {
