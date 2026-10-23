@@ -20,10 +20,8 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      # The Android Gradle Plugin downloads the compileSdk platform and ndkVersion it needs
       - uses: gradle/actions/setup-gradle@v4
-
-      - name: Install SDK platform and NDK
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "ndk;29.0.14206865" > /dev/null
 
       - name: Decode signing key
         env:
