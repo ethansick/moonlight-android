@@ -30,6 +30,18 @@ public class DualSenseController extends AbstractController {
     private static final int FLAG0_HAPTICS_SELECT = 0x02;
     private static final int FLAG2_COMPATIBLE_VIBRATION2 = 0x04;
 
+    private static final int FEATURE_REPORT_CALIBRATION = 0x05;
+    private static final int FEATURE_REPORT_CALIBRATION_SIZE = 41;
+
+    // Calibrated motion units: 1/1024 deg/s and 1/8192 g
+    private static final int GYRO_RES_PER_DEG_S = 1024;
+    private static final int ACC_RES_PER_G = 8192;
+    private static final float STANDARD_GRAVITY = 9.80665f;
+
+    // Report offsets of the three gyro (pitch, yaw, roll) and accelerometer (x, y, z) values
+    private static final int GYRO_OFFSET = 16;
+    private static final int ACCEL_OFFSET = 22;
+
     private final UsbDevice device;
     private final UsbDeviceConnection connection;
 
@@ -42,6 +54,15 @@ public class DualSenseController extends AbstractController {
     // Sticks, triggers and buttons from the last report (bytes 1-6 and 8-11). The controller
     // reports continuously, so we only pass input on when one of these changes.
     private final byte[] lastState = new byte[10];
+
+    // Motion calibration from feature report 0x05, applied like hid-playstation does:
+    // gyro = raw * numer / denom, accel = (raw - bias) * numer / denom
+    private final float[] gyroNumer = new float[3], gyroDenom = new float[3];
+    private final float[] accelBias = new float[3], accelNumer = new float[3], accelDenom = new float[3];
+
+    // Host-requested time between motion reports (0 = off) and when each was last sent
+    private volatile long gyroIntervalNs, accelIntervalNs;
+    private long lastGyroNs, lastAccelNs;
 
     public static boolean canClaimDevice(UsbDevice device) {
         return device.getVendorId() == SONY_VID &&
@@ -69,7 +90,8 @@ public class DualSenseController extends AbstractController {
         this.device = device;
         this.connection = connection;
         this.type = MoonBridge.LI_CTYPE_PS;
-        this.capabilities = MoonBridge.LI_CCAP_ANALOG_TRIGGERS | MoonBridge.LI_CCAP_RUMBLE;
+        this.capabilities = MoonBridge.LI_CCAP_ANALOG_TRIGGERS | MoonBridge.LI_CCAP_RUMBLE |
+                MoonBridge.LI_CCAP_GYRO | MoonBridge.LI_CCAP_ACCEL;
         this.supportedButtonFlags =
                 ControllerPacket.A_FLAG | ControllerPacket.B_FLAG | ControllerPacket.X_FLAG | ControllerPacket.Y_FLAG |
                         ControllerPacket.UP_FLAG | ControllerPacket.DOWN_FLAG | ControllerPacket.LEFT_FLAG | ControllerPacket.RIGHT_FLAG |
@@ -121,6 +143,10 @@ public class DualSenseController extends AbstractController {
     private boolean handleRead(byte[] report, int length) {
         if (report[0] != INPUT_REPORT_USB || length < 12) {
             return false;
+        }
+
+        if (length >= ACCEL_OFFSET + 6) {
+            handleMotion(report);
         }
 
         // Skip the sequence number at byte 7
@@ -185,6 +211,94 @@ public class DualSenseController extends AbstractController {
         return Math.max(-1.0f, ((raw & 0xFF) - 128) / 127.0f);
     }
 
+    private static short le16(byte[] buf, int offset) {
+        return (short)((buf[offset] & 0xFF) | (buf[offset + 1] << 8));
+    }
+
+    // Send gyro (deg/s) and accelerometer (m/s^2) at the host's requested rates. The controller
+    // reports about every 4 ms, so allow some slack or a 200 Hz request would come out at 125 Hz.
+    private void handleMotion(byte[] report) {
+        long now = SystemClock.elapsedRealtimeNanos();
+
+        long gyroInterval = gyroIntervalNs;
+        if (gyroInterval != 0 && now - lastGyroNs >= gyroInterval * 3 / 4) {
+            lastGyroNs = now;
+
+            float[] v = new float[3];
+            for (int i = 0; i < 3; i++) {
+                v[i] = le16(report, GYRO_OFFSET + 2 * i) * gyroNumer[i] / gyroDenom[i] / GYRO_RES_PER_DEG_S;
+            }
+            reportMotion(MoonBridge.LI_MOTION_TYPE_GYRO, v[0], v[1], v[2]);
+        }
+
+        long accelInterval = accelIntervalNs;
+        if (accelInterval != 0 && now - lastAccelNs >= accelInterval * 3 / 4) {
+            lastAccelNs = now;
+
+            float[] v = new float[3];
+            for (int i = 0; i < 3; i++) {
+                v[i] = (le16(report, ACCEL_OFFSET + 2 * i) - accelBias[i]) * accelNumer[i] / accelDenom[i] /
+                        ACC_RES_PER_G * STANDARD_GRAVITY;
+            }
+            reportMotion(MoonBridge.LI_MOTION_TYPE_ACCEL, v[0], v[1], v[2]);
+        }
+    }
+
+    @Override
+    public void setMotionEventState(byte motionType, short reportRateHz) {
+        long intervalNs = reportRateHz > 0 ? 1_000_000_000L / reportRateHz : 0;
+        if (motionType == MoonBridge.LI_MOTION_TYPE_GYRO) {
+            gyroIntervalNs = intervalNs;
+        }
+        else if (motionType == MoonBridge.LI_MOTION_TYPE_ACCEL) {
+            accelIntervalNs = intervalNs;
+        }
+    }
+
+    // Reads feature report 0x05 and derives the scale factors like hid-playstation's
+    // dualsense_get_calibration_data(), including its fallbacks for zero ranges
+    private void readCalibration() {
+        for (int i = 0; i < 3; i++) {
+            gyroNumer[i] = 2048 * GYRO_RES_PER_DEG_S;
+            gyroDenom[i] = Short.MAX_VALUE;
+            accelBias[i] = 0;
+            accelNumer[i] = 4 * ACC_RES_PER_G;
+            accelDenom[i] = Short.MAX_VALUE;
+        }
+
+        byte[] buf = new byte[FEATURE_REPORT_CALIBRATION_SIZE];
+        // HID GET_REPORT (feature) to the HID interface
+        int res = connection.controlTransfer(0xA1, 0x01, (0x03 << 8) | FEATURE_REPORT_CALIBRATION,
+                hidIface.getId(), buf, buf.length, 1000);
+        if (res < 35 || buf[0] != FEATURE_REPORT_CALIBRATION) {
+            LimeLog.warning("DualSense: no calibration data ("+res+"), using defaults");
+            return;
+        }
+
+        int speed2x = le16(buf, 19) + le16(buf, 21);
+        for (int i = 0; i < 3; i++) {
+            // Bias, then plus and minus for pitch, yaw and roll
+            int bias = le16(buf, 1 + 2 * i);
+            int plus = le16(buf, 7 + 4 * i);
+            int minus = le16(buf, 9 + 4 * i);
+            int denom = Math.abs(plus - bias) + Math.abs(minus - bias);
+            if (denom != 0) {
+                gyroNumer[i] = speed2x * GYRO_RES_PER_DEG_S;
+                gyroDenom[i] = denom;
+            }
+        }
+        for (int i = 0; i < 3; i++) {
+            int plus = le16(buf, 23 + 4 * i);
+            int minus = le16(buf, 25 + 4 * i);
+            int range2g = plus - minus;
+            if (range2g != 0) {
+                accelBias[i] = plus - range2g / 2;
+                accelNumer[i] = 2 * ACC_RES_PER_G;
+                accelDenom[i] = range2g;
+            }
+        }
+    }
+
     public boolean start() {
         for (int i = 0; i < device.getInterfaceCount(); i++) {
             UsbInterface iface = device.getInterface(i);
@@ -222,6 +336,8 @@ public class DualSenseController extends AbstractController {
             connection.releaseInterface(hidIface);
             return false;
         }
+
+        readCalibration();
 
         inputThread = createInputThread();
         inputThread.start();

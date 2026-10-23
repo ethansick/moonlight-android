@@ -2321,6 +2321,14 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
                 break;
             }
         }
+
+        // USB driver controllers read their own motion sensors
+        for (int i = 0; i < usbDeviceContexts.size(); i++) {
+            UsbDeviceContext deviceContext = usbDeviceContexts.valueAt(i);
+            if (deviceContext.assignedControllerNumber && deviceContext.controllerNumber == controllerNumber) {
+                deviceContext.device.setMotionEventState(motionType, reportRateHz);
+            }
+        }
     }
 
     public void handleSetControllerLED(short controllerNumber, byte r, byte g, byte b) {
@@ -2877,6 +2885,16 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         }
 
         sendControllerInputPacket(context);
+    }
+
+    @Override
+    public void reportControllerMotion(int controllerId, byte motionType, float x, float y, float z) {
+        UsbDeviceContext context = usbDeviceContexts.get(controllerId);
+        if (context == null || !connectionStarted || !context.assignedControllerNumber) {
+            return;
+        }
+
+        conn.sendControllerMotionEvent((byte) context.controllerNumber, motionType, x, y, z);
     }
 
     @Override

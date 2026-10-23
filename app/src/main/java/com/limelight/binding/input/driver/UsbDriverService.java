@@ -52,6 +52,13 @@ public class UsbDriverService extends Service implements UsbDriverListener {
     }
 
     @Override
+    public void reportControllerMotion(int controllerId, byte motionType, float x, float y, float z) {
+        if (listener != null) {
+            listener.reportControllerMotion(controllerId, motionType, x, y, z);
+        }
+    }
+
+    @Override
     public void deviceRemoved(AbstractController controller) {
         // Remove the the controller from our list (if not removed already)
         controllers.remove(controller);

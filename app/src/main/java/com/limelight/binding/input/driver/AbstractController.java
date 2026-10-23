@@ -53,6 +53,14 @@ public abstract class AbstractController {
                 rightStickX, rightStickY, leftTrigger, rightTrigger);
     }
 
+    protected void reportMotion(byte motionType, float x, float y, float z) {
+        listener.reportControllerMotion(deviceId, motionType, x, y, z);
+    }
+
+    // The host's requested report rate for a motion sensor (0 to stop). Controllers without
+    // motion sensors ignore this.
+    public void setMotionEventState(byte motionType, short reportRateHz) {}
+
     public abstract boolean start();
     public abstract void stop();
 
